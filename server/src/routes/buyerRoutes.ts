@@ -51,7 +51,11 @@ router.get('/decisions/:id', async (req: Request, res: Response): Promise<void> 
  */
 router.post('/override', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { decision_id, new_route, new_supplier_id, reason, buyer_name } = req.body;
+    const decision_id = req.body.decision_id || req.body.decisionId;
+    const new_route = req.body.new_route || req.body.overrideRoute;
+    const new_supplier_id = req.body.new_supplier_id || req.body.overrideSupplier;
+    const reason = req.body.reason || req.body.overrideComment;
+    const buyer_name = req.body.buyer_name || req.body.buyerName;
 
     if (!decision_id) {
       res.status(400).json({ error: 'decision_id is required' });

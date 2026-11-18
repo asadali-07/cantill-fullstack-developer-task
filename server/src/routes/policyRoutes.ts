@@ -22,7 +22,7 @@ router.get('/active', async (_req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    res.json({ policy: active });
+    res.json({ policy: active, ...active });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -54,7 +54,7 @@ router.post(
   upload.single('pdf'),
   async (req: Request, res: Response): Promise<void> => {
     try {
-      let amendmentText = req.body?.text || '';
+      let amendmentText = req.body?.text || req.body?.amendmentText || '';
 
       if (req.file) {
         const parsed = await pdfParse(req.file.buffer);
@@ -84,6 +84,8 @@ router.post(
       res.json({
         success: true,
         currentVersion,
+        new_version: proposed.proposedVersion,
+        proposed_policy: proposed.updatedRules,
         ...proposed,
       });
     } catch (err: any) {
@@ -99,7 +101,12 @@ router.post(
  */
 router.post('/approve-amendment', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { version, effectiveDate, description, rules, diff, summary } = req.body;
+    const version = req.body.version || req.body.new_version;
+    const rules = req.body.rules || req.body.proposed_policy;
+    const effectiveDate = req.body.effectiveDate || req.body.effective_date;
+    const description = req.body.description || req.body.amendment_description;
+    const summary = req.body.summary;
+    const diff = req.body.diff;
 
     if (!version || !rules) {
       res.status(400).json({ error: 'Version and rules are required' });

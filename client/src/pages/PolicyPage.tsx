@@ -29,16 +29,21 @@ interface PolicyVersion {
   created_at: string;
 }
 
+interface PolicyDiffItem {
+  field: string;
+  label?: string;
+  oldValue: any;
+  newValue: any;
+  explanation?: string;
+}
+
 interface DiffPreview {
-  new_version: string;
-  previous_version: string;
-  diff: {
-    changed_rules: Array<{ rule: string; old_value: any; new_value: any }>;
-    added_rules: Array<{ rule: string; value: any }>;
-    removed_rules: Array<{ rule: string; value: any }>;
-    summary: string;
-  };
-  proposed_policy: Record<string, any>;
+  currentVersion?: string;
+  proposedVersion: string;
+  effectiveDate?: string;
+  summary: string;
+  diff: PolicyDiffItem[];
+  updatedRules: Record<string, any>;
 }
 
 const sampleAmendments = [
@@ -65,8 +70,18 @@ export default function PolicyPage() {
         apiClient.get('/policy/active'),
         apiClient.get('/policy/versions'),
       ]);
-      setActivePolicy(activeRes.data);
-      setAllVersions(versionsRes.data);
+
+      const active = activeRes.data?.policy || activeRes.data;
+      if (active && typeof active === 'object') {
+        setActivePolicy(active);
+      }
+
+      const versions = Array.isArray(versionsRes.data?.versions)
+        ? versionsRes.data.versions
+        : Array.isArray(versionsRes.data)
+        ? versionsRes.data
+        : [];
+      setAllVersions(versions);
     } catch (err: any) {
       toast.error('Failed to load policy data');
     } finally {
@@ -88,9 +103,30 @@ export default function PolicyPage() {
     setPreviewing(true);
     try {
       const res = await apiClient.post('/policy/preview-amendment', {
+        text: amendmentText.trim(),
         amendmentText: amendmentText.trim(),
       });
-      setDiffPreview(res.data);
+
+      const data = res.data;
+      setDiffPreview({
+        currentVersion: data.currentVersion || data.previous_version || '5.0',
+        proposedVersion: data.proposedVersion || data.new_version || '5.1',
+        effectiveDate: data.effectiveDate,
+        summary: data.summary || data.diff?.summary || 'Policy rules update detected',
+        diff: Array.isArray(data.diff)
+          ? data.diff
+          : Array.isArray(data.diff?.changed_rules)
+          ? data.diff.changed_rules.map((c: any) => ({
+              field: c.rule || c.field,
+              label: c.rule || c.field,
+              oldValue: c.old_value ?? c.oldValue,
+              newValue: c.new_value ?? c.newValue,
+              explanation: `Changed ${c.rule || c.field} from ${c.old_value} to ${c.new_value}`,
+            }))
+          : [],
+        updatedRules: data.updatedRules || data.proposed_policy || {},
+      });
+
       toast.success('Gemini AI analyzed policy amendment!');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to preview amendment');
@@ -106,12 +142,17 @@ export default function PolicyPage() {
     setApproving(true);
     try {
       await apiClient.post('/policy/approve-amendment', {
-        new_version: diffPreview.new_version,
-        rules: diffPreview.proposed_policy,
-        amendment_description: diffPreview.diff.summary || amendmentText,
+        version: diffPreview.proposedVersion,
+        new_version: diffPreview.proposedVersion,
+        rules: diffPreview.updatedRules,
+        proposed_policy: diffPreview.updatedRules,
+        description: diffPreview.summary || amendmentText,
+        summary: diffPreview.summary,
+        diff: diffPreview.diff,
+        effectiveDate: diffPreview.effectiveDate,
       });
 
-      toast.success(`Activated Policy ${diffPreview.new_version} successfully!`);
+      toast.success(`Activated Policy ${diffPreview.proposedVersion} successfully!`);
       setDiffPreview(null);
       setAmendmentText('');
       await loadPolicyData();
@@ -174,7 +215,7 @@ export default function PolicyPage() {
                 </h3>
               </div>
               <span className="text-[11px] text-slate-400">
-                Effective: {activePolicy ? new Date(activePolicy.effective_date).toLocaleDateString() : 'N/A'}
+                Effective: {activePolicy?.effective_date ? new Date(activePolicy.effective_date).toLocaleDateString() : 'N/A'}
               </span>
             </div>
 
@@ -185,7 +226,7 @@ export default function PolicyPage() {
                     Spot PO Limit
                   </span>
                   <div className="text-base font-bold text-slate-800">
-                    ₹{activePolicy.rules.spot_po_limit?.toLocaleString('en-IN')}
+                    ₹{activePolicy.rules.spot_po_limit?.toLocaleString('en-IN') ?? '0'}
                   </div>
                   <span className="text-[10px] text-slate-500">Clause 5.3 single quote</span>
                 </div>
@@ -195,7 +236,7 @@ export default function PolicyPage() {
                     Emergency PO Limit
                   </span>
                   <div className="text-base font-bold text-slate-800">
-                    ₹{activePolicy.rules.emergency_po_limit?.toLocaleString('en-IN')}
+                    ₹{activePolicy.rules.emergency_po_limit?.toLocaleString('en-IN') ?? '0'}
                   </div>
                   <span className="text-[10px] text-slate-500">Clause 5.4 fast-track</span>
                 </div>
@@ -205,7 +246,7 @@ export default function PolicyPage() {
                     RFQ Ceiling
                   </span>
                   <div className="text-base font-bold text-slate-800">
-                    ₹{activePolicy.rules.rfq_limit?.toLocaleString('en-IN')}
+                    ₹{activePolicy.rules.rfq_limit?.toLocaleString('en-IN') ?? '0'}
                   </div>
                   <span className="text-[10px] text-slate-500">Clause 5.5 (3 quotes)</span>
                 </div>
@@ -215,7 +256,7 @@ export default function PolicyPage() {
                     RFP Threshold
                   </span>
                   <div className="text-base font-bold text-slate-800">
-                    ₹{activePolicy.rules.rfp_threshold?.toLocaleString('en-IN')}
+                    ₹{activePolicy.rules.rfp_threshold?.toLocaleString('en-IN') ?? '0'}
                   </div>
                   <span className="text-[10px] text-slate-500">Clause 5.6 (5 quotes)</span>
                 </div>
@@ -225,9 +266,11 @@ export default function PolicyPage() {
                     Clubbing Window
                   </span>
                   <div className="text-base font-bold text-slate-800">
-                    {activePolicy.rules.clubbing_window_days} Days
+                    {activePolicy.rules.clubbing_window_days ?? 14} Days
                   </div>
-                  <span className="text-[10px] text-slate-500">Tolerance: ±{activePolicy.rules.clubbing_needby_tolerance_days}d</span>
+                  <span className="text-[10px] text-slate-500">
+                    Tolerance: ±{activePolicy.rules.clubbing_needby_tolerance_days ?? 7}d
+                  </span>
                 </div>
 
                 <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
@@ -315,18 +358,18 @@ export default function PolicyPage() {
                 <div className="flex items-center gap-2">
                   <CheckCircle2 size={18} className="text-primary-700" />
                   <h4 className="text-sm font-bold text-slate-900">
-                    Proposed Version: {diffPreview.new_version}
+                    Proposed Version: {diffPreview.proposedVersion}
                   </h4>
                 </div>
                 <span className="text-[11px] text-primary-800 font-medium">
-                  Base: {diffPreview.previous_version}
+                  Base: {diffPreview.currentVersion}
                 </span>
               </div>
 
               {/* Summary */}
               <div className="rounded-xl bg-white p-3 border border-primary-100 text-xs text-slate-700 mb-4 shadow-2xs">
                 <span className="font-semibold text-primary-900 block mb-0.5">AI Interpretation Summary:</span>
-                <p className="leading-relaxed">{diffPreview.diff.summary}</p>
+                <p className="leading-relaxed">{diffPreview.summary}</p>
               </div>
 
               {/* Changed Rules Table */}
@@ -334,33 +377,37 @@ export default function PolicyPage() {
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 block">
                   Rule Changes:
                 </span>
-                {diffPreview.diff.changed_rules.length === 0 ? (
-                  <div className="text-xs text-slate-500 italic">No existing thresholds changed.</div>
+                {!diffPreview.diff || diffPreview.diff.length === 0 ? (
+                  <div className="text-xs text-slate-500 italic">No direct threshold changes detected.</div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                     <table className="w-full text-xs text-left">
                       <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200">
                         <tr>
-                          <th className="px-3 py-2">Rule / Threshold</th>
+                          <th className="px-3 py-2">Rule / Field</th>
                           <th className="px-3 py-2 text-red-600">Previous Value</th>
                           <th className="px-3 py-2 text-emerald-600">New Proposed Value</th>
+                          <th className="px-3 py-2">Explanation</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {diffPreview.diff.changed_rules.map((change, idx) => (
+                        {diffPreview.diff.map((change, idx) => (
                           <tr key={idx} className="hover:bg-slate-50">
                             <td className="px-3 py-2 font-mono font-medium text-slate-800">
-                              {change.rule}
+                              {change.label || change.field}
                             </td>
                             <td className="px-3 py-2 text-red-700 font-mono">
-                              {typeof change.old_value === 'number'
-                                ? `₹${change.old_value.toLocaleString('en-IN')}`
-                                : JSON.stringify(change.old_value)}
+                              {typeof change.oldValue === 'number'
+                                ? `₹${change.oldValue.toLocaleString('en-IN')}`
+                                : JSON.stringify(change.oldValue)}
                             </td>
                             <td className="px-3 py-2 text-emerald-700 font-mono font-bold">
-                              {typeof change.new_value === 'number'
-                                ? `₹${change.new_value.toLocaleString('en-IN')}`
-                                : JSON.stringify(change.new_value)}
+                              {typeof change.newValue === 'number'
+                                ? `₹${change.newValue.toLocaleString('en-IN')}`
+                                : JSON.stringify(change.newValue)}
+                            </td>
+                            <td className="px-3 py-2 text-slate-600 text-[11px]">
+                              {change.explanation || '-'}
                             </td>
                           </tr>
                         ))}
@@ -384,7 +431,7 @@ export default function PolicyPage() {
                   className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 text-xs font-bold shadow-xs transition-colors"
                 >
                   <Check size={14} />
-                  {approving ? 'Activating...' : `Approve & Activate ${diffPreview.new_version}`}
+                  {approving ? 'Activating...' : `Approve & Activate ${diffPreview.proposedVersion}`}
                 </button>
               </div>
             </div>
@@ -400,7 +447,7 @@ export default function PolicyPage() {
             </div>
 
             <div className="space-y-3">
-              {allVersions.length === 0 ? (
+              {!Array.isArray(allVersions) || allVersions.length === 0 ? (
                 <div className="py-4 text-center text-xs text-slate-400">No versions found.</div>
               ) : (
                 allVersions.map((v) => (
@@ -431,7 +478,7 @@ export default function PolicyPage() {
                     <p className="text-[11px] text-slate-600 line-clamp-2 mb-2">{v.description}</p>
 
                     <div className="flex items-center justify-between text-[10px] text-slate-400 border-t border-slate-100 pt-1.5">
-                      <span>{new Date(v.effective_date).toLocaleDateString()}</span>
+                      <span>{v.effective_date ? new Date(v.effective_date).toLocaleDateString() : 'N/A'}</span>
                       <span>Spot: ₹{v.rules?.spot_po_limit?.toLocaleString('en-IN') || 0}</span>
                     </div>
                   </div>
