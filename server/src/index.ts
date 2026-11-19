@@ -1,7 +1,7 @@
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import path from 'path';
 import { connectDB } from './config/db';
 import batchRoutes from './routes/batchRoutes';
 import buyerRoutes from './routes/buyerRoutes';
@@ -10,23 +10,44 @@ import contractRoutes from './routes/contractRoutes';
 import policyRoutes from './routes/policyRoutes';
 import chatRoutes from './routes/chatRoutes';
 
-// Load environment variables from project root
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config();
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
-// Middleware
-app.use(cors());
+// CORS configuration
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.FRONTEND_URL
+].filter(Boolean) as string[];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests without an origin (Postman, server-to-server, etc.)
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+}));
+
+// Handle preflight requests
+app.options('*', cors());
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Health check route
+// Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Mounted API routes
+// API routes
 app.use('/api', batchRoutes);
 app.use('/api/buyer', buyerRoutes);
 app.use('/api/suppliers', supplierRoutes);
@@ -38,6 +59,7 @@ app.use('/api/chat', chatRoutes);
 async function start(): Promise<void> {
   try {
     await connectDB();
+
     app.listen(PORT, () => {
       console.log(`[Server] Running on http://localhost:${PORT}`);
       console.log(`[Server] Health check: http://localhost:${PORT}/api/health`);
@@ -48,7 +70,6 @@ async function start(): Promise<void> {
   }
 }
 
-// Only auto-start if index.ts is executed directly as main script
 const isMainScript =
   process.argv[1]?.replace(/\\/g, '/').endsWith('src/index.ts') ||
   process.argv[1]?.replace(/\\/g, '/').endsWith('dist/index.js') ||

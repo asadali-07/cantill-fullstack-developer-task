@@ -1,8 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
-import path from 'path';
 
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+dotenv.config();
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 
@@ -15,7 +14,7 @@ export const genAI = new GoogleGenerativeAI(apiKey);
 /**
  * Returns a generative model configured for JSON output
  */
-export function getGeminiModel(modelName: string = 'gemini-2.5-flash', systemInstruction?: string) {
+export function getGeminiModel(modelName: string = 'gemini-3.1-flash-lite', systemInstruction?: string) {
   return genAI.getGenerativeModel({
     model: modelName,
     ...(systemInstruction ? { systemInstruction } : {}),

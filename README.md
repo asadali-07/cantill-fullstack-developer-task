@@ -39,8 +39,7 @@ Policy amendments are handled dynamically through the user interface using Gemin
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Lucide Icons, Axios, React Hot Toast
 - **Backend**: Node.js, Express, TypeScript, Mongoose 8, CSV-Parse/Stringify, PDF-Parse
 - **Database**: MongoDB Atlas Cloud Database
-- **AI Model**: Google Gemini API (`gemini-2.5-flash`)
-- **Containerization**: Docker & Docker Compose with multi-stage builds and Nginx
+- **AI Model**: Google Gemini API (`gemini-3.1-flash-lite`)
 
 ---
 
@@ -99,17 +98,6 @@ npm run dev
 ```
 
 Visit **`http://localhost:5173`** in your browser.
-
----
-
-## 🐳 Running with Docker
-
-Run the complete multi-container stack with a single command:
-```bash
-docker-compose up --build
-```
-- Client (Nginx SPA): `http://localhost` (Port 80)
-- Backend REST API: `http://localhost:5000`
 
 ---
 

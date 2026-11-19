@@ -2,11 +2,13 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 
 const apiClient = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.DEV
+    ? '/api'
+    : `${import.meta.env.VITE_API_URL}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30_000,
+  timeout: 60_000,
 });
 
 apiClient.interceptors.response.use(

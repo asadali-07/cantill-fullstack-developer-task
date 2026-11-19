@@ -66,13 +66,52 @@ export default function WorkspacePage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Helper to normalize any decision object (from DB or engine result)
+  const normalizeDecision = (d: any): DecisionRow => {
+    const route = d.route || d.decision || (d.decision === 'PO' ? 'DIRECT_PO' : 'RFQ');
+    const pr_no = d.pr_no || d.pr_lines?.[0]?.pr_no || '';
+    const pr_line = Number(d.pr_line ?? d.pr_lines?.[0]?.pr_line ?? 1);
+    const quantity = Number(d.quantity ?? d.total_quantity ?? 0);
+    const group_value_inr = Number(d.group_value_inr ?? d.total_value ?? 0);
+    const reason = d.reason || d.decision_reason || '';
+    const item_code = d.item_code || d.resolved_item_code || '';
+    const item_description = d.item_description || d.description || '';
+    const unit_price = Number(d.unit_price ?? 0);
+    const id = d._id || d.id || d.decision_id || `${pr_no}-${pr_line}`;
+
+    return {
+      ...d,
+      _id: id,
+      id,
+      pr_no,
+      pr_line,
+      item_code,
+      item_description,
+      quantity,
+      uom: d.uom || 'NOS',
+      plant: d.plant || '',
+      route: String(route),
+      supplier_id: d.supplier_id || '',
+      supplier_name: d.supplier_name || '',
+      unit_price,
+      group_value_inr,
+      reason,
+      status:
+        d.buyer_override || d.status === 'buyer_overridden' || d.status === 'OVERRIDDEN'
+          ? 'OVERRIDDEN'
+          : d.status === 'buyer_approved' || d.status === 'APPROVED'
+          ? 'APPROVED'
+          : 'PENDING',
+    };
+  };
+
   // Fetch decisions on load
   const loadDecisions = async () => {
     setLoading(true);
     try {
       const res = await apiClient.get('/buyer/decisions');
       if (res.data?.decisions && Array.isArray(res.data.decisions)) {
-        setDecisions(res.data.decisions);
+        setDecisions(res.data.decisions.map(normalizeDecision));
       }
     } catch {
       // If none yet or error, silent
@@ -99,9 +138,10 @@ export default function WorkspacePage() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      toast.success(`Processed ${res.data.total_pr_lines} PR lines successfully!`);
-      if (res.data.results) {
-        setDecisions(res.data.results);
+      const totalCount = res.data.total_pr_lines || res.data.totalLines || res.data.results?.length || 0;
+      toast.success(`Processed ${totalCount} PR lines successfully!`);
+      if (res.data.results && Array.isArray(res.data.results)) {
+        setDecisions(res.data.results.map(normalizeDecision));
       } else {
         await loadDecisions();
       }
@@ -133,12 +173,24 @@ export default function WorkspacePage() {
 
     setOverrideSubmitting(true);
     try {
-      const decisionId = selectedDecision._id || selectedDecision.id || selectedDecision.pr_line_id;
-      const res = await apiClient.post('/buyer/override', {
+      const decisionId =
+        selectedDecision._id ||
+        selectedDecision.id ||
+        (selectedDecision as any).decision_id ||
+        selectedDecision.pr_no ||
+        selectedDecision.pr_line_id;
+
+      await apiClient.post('/buyer/override', {
+        decision_id: decisionId,
         decisionId,
+        new_route: newRoute,
         overrideRoute: newRoute,
+        new_supplier_id: newSupplier,
         overrideSupplier: newSupplier,
+        reason: overrideComment.trim(),
         overrideComment: overrideComment.trim(),
+        buyer_name: 'Senior Buyer',
+        buyerName: 'Senior Buyer',
       });
 
       toast.success('Decision overridden successfully');
@@ -147,7 +199,7 @@ export default function WorkspacePage() {
       // Update local state
       setDecisions((prev) =>
         prev.map((d) => {
-          const id = d._id || d.id || d.pr_line_id;
+          const id = d._id || d.id || (d as any).decision_id || d.pr_no || d.pr_line_id;
           if (id === decisionId) {
             return {
               ...d,
@@ -169,16 +221,18 @@ export default function WorkspacePage() {
 
   // Handle Approve
   const handleApprove = async (row: DecisionRow) => {
-    const decisionId = row._id || row.id || row.pr_line_id;
+    const decisionId = row._id || row.id || (row as any).decision_id || row.pr_no || row.pr_line_id;
     try {
       await apiClient.post('/buyer/approve', {
+        decision_id: decisionId,
         decisionId,
+        approved_by: 'Senior Buyer',
         buyerName: 'Senior Buyer',
       });
-      toast.success(`Approved PR ${row.pr_no}`);
+      toast.success(`Approved PR ${row.pr_no || decisionId}`);
       setDecisions((prev) =>
         prev.map((d) => {
-          const id = d._id || d.id || d.pr_line_id;
+          const id = d._id || d.id || (d as any).decision_id || d.pr_no || d.pr_line_id;
           return id === decisionId ? { ...d, status: 'APPROVED' } : d;
         })
       );
@@ -213,11 +267,12 @@ export default function WorkspacePage() {
 
   // Filtered decisions
   const filteredDecisions = decisions.filter((d) => {
+    const term = searchTerm.toLowerCase();
     const matchSearch =
-      d.pr_no?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.item_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.item_description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.supplier_id?.toLowerCase().includes(searchTerm.toLowerCase());
+      (d.pr_no || '').toLowerCase().includes(term) ||
+      (d.item_code || '').toLowerCase().includes(term) ||
+      (d.item_description || '').toLowerCase().includes(term) ||
+      (d.supplier_id || '').toLowerCase().includes(term);
 
     const matchRoute = routeFilter === 'ALL' || d.route === routeFilter;
     const matchPlant = plantFilter === 'ALL' || d.plant === plantFilter;
@@ -226,27 +281,29 @@ export default function WorkspacePage() {
   });
 
   // KPI calculations
-  const totalValue = decisions.reduce((sum, d) => sum + (d.group_value_inr || 0), 0);
-  const poCount = decisions.filter((d) => d.route.includes('PO')).length;
-  const sourcingCount = decisions.filter((d) => d.route.includes('SOURCING')).length;
+  const totalValue = decisions.reduce((sum, d) => sum + (Number(d.group_value_inr) || 0), 0);
+  const poCount = decisions.filter((d) => (d.route || '').toUpperCase().includes('PO')).length;
+  const sourcingCount = decisions.filter((d) => {
+    const r = (d.route || '').toUpperCase();
+    return (
+      r.includes('SOURCING') ||
+      r.includes('RFQ') ||
+      r.includes('RFP') ||
+      r.includes('REQUEST')
+    );
+  }).length;
 
   const getRouteBadge = (route: string) => {
-    switch (route) {
-      case 'CONTRACT_PO':
-        return 'bg-blue-50 text-blue-700 border-blue-200';
-      case 'DIRECT_PO':
-        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-      case 'APPROVED_PO':
-        return 'bg-indigo-50 text-indigo-700 border-indigo-200';
-      case 'CATALOG_PO':
-        return 'bg-teal-50 text-teal-700 border-teal-200';
-      case 'SOURCING_RFQ':
-        return 'bg-amber-50 text-amber-700 border-amber-200';
-      case 'SOURCING_RFP':
-        return 'bg-purple-50 text-purple-700 border-purple-200';
-      default:
-        return 'bg-slate-50 text-slate-700 border-slate-200';
-    }
+    const r = (route || '').toUpperCase();
+    if (r.includes('CONTRACT')) return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (r.includes('SPOT') || r === 'DIRECT_PO') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (r.includes('EMERGENCY')) return 'bg-rose-50 text-rose-700 border-rose-200';
+    if (r.includes('CAPEX')) return 'bg-amber-50 text-amber-700 border-amber-200';
+    if (r.includes('RFP')) return 'bg-purple-50 text-purple-700 border-purple-200';
+    if (r.includes('RFQ')) return 'bg-orange-50 text-orange-700 border-orange-200';
+    if (r.includes('NEW_ITEM')) return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+    if (r.includes('PO')) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    return 'bg-slate-50 text-slate-700 border-slate-200';
   };
 
   return (
@@ -470,7 +527,9 @@ export default function WorkspacePage() {
                         <span className="font-mono text-slate-800">{d.supplier_id || '-'}</span>
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap font-mono text-slate-700">
-                        {d.unit_price ? `₹${d.unit_price.toFixed(2)}` : '-'}
+                        {d.unit_price && !isNaN(Number(d.unit_price)) && Number(d.unit_price) > 0
+                          ? `₹${Number(d.unit_price).toFixed(2)}`
+                          : '-'}
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap font-mono font-medium text-slate-900">
                         ₹{d.group_value_inr?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}

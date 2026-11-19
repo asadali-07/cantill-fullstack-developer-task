@@ -3,6 +3,7 @@ import multer from 'multer';
 import pdfParse from 'pdf-parse';
 import { Contract, IContract } from '../models/Contract';
 import { ContractLine, IContractLine } from '../models/ContractLine';
+import { Supplier } from '../models/Supplier';
 import { getAllContractsWithPDFs } from '../engine/contracts';
 
 const router = Router();
@@ -21,6 +22,9 @@ router.get('/', async (_req: Request, res: Response): Promise<void> => {
 
     const { contracts, contractLines } = getAllContractsWithPDFs(dbContracts, dbLines);
 
+    // Sort all contracts by start_date descending so newest/uploaded contracts show up first
+    contracts.sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime());
+
     const contractsWithDetails = contracts.map((c) => {
       const lines = contractLines.filter((l) => l.contract_id === c.contract_id);
       const remaining = Math.max(0, c.value_cap - (c.consumed_value || 0));
@@ -28,10 +32,27 @@ router.get('/', async (_req: Request, res: Response): Promise<void> => {
 
       return {
         ...c,
+        contract_ref: c.contract_id,
+        contract_id: c.contract_id,
+        ceiling_value: c.value_cap,
+        value_cap: c.value_cap,
+        cumulative_spend: c.consumed_value || 0,
+        consumed_value: c.consumed_value || 0,
+        valid_from: c.start_date,
+        start_date: c.start_date,
+        valid_to: c.end_date,
+        end_date: c.end_date,
+        plant: (c as any).plant || 'ALL (PUN1, CHN1)',
         remaining_ceiling: remaining,
         pct_used: pctUsed,
         lines_count: lines.length,
-        lines,
+        lines: lines.map((l) => ({
+          ...l,
+          contracted_price: l.rate,
+          rate: l.rate,
+          item_description: l.description,
+          description: l.description,
+        })),
       };
     });
 
@@ -77,7 +98,7 @@ router.post('/manual', async (req: Request, res: Response): Promise<void> => {
 
 /**
  * POST /api/contracts/upload-pdf
- * Extract contract info from PDF and add to register (Brief Section 3 #8)
+ * Extract contract info from PDF and persist to register (Brief Section 3 #8)
  */
 router.post(
   '/upload-pdf',
@@ -92,28 +113,46 @@ router.post(
       const pdfData = await pdfParse(req.file.buffer);
       const text = pdfData.text;
 
-      // Extract Contract No.
+      // 1. Extract Contract No. - prefer filename if it contains a contract ref (e.g. RC-2026-049), else PDF text
+      const fileMatch = req.file.originalname?.match(/(RC-\d{4}-\d{3})/i);
       const contractNoMatch = text.match(/Contract\s+No\.?\s*([A-Z0-9-]+)/i);
-      const contractId = contractNoMatch ? contractNoMatch[1] : `RC-${Date.now()}`;
+      const contractId = fileMatch
+        ? fileMatch[1].toUpperCase()
+        : contractNoMatch
+        ? contractNoMatch[1].trim()
+        : `RC-${Date.now()}`;
 
-      // Extract Supplier ID & Name
-      const supplierMatch = text.match(/between\s+Corvo[^\n]+and\s+([^,]+),\s*([^\n(]+)\(Supplier ID\s*([A-Z0-9]+)\)/i);
-      const supplierName = supplierMatch ? supplierMatch[1].trim() : 'Unknown Supplier';
-      const supplierId = supplierMatch ? supplierMatch[3].trim() : 'S001';
+      // 2. Extract Supplier ID & Name
+      const suppIdMatch = text.match(/Supplier\s+ID\s*([A-Z0-9]+)/i);
+      const supplierId = suppIdMatch ? suppIdMatch[1].trim() : 'S001';
 
-      // Extract Term dates: valid from YYYY-MM-DD to YYYY-MM-DD
+      let supplierName = '';
+      const suppNameMatch = text.match(/(?:and|between)\s+([^,]+?),\s*([^\n(]+?)\s*\(Supplier/is);
+      if (suppNameMatch) {
+        supplierName = suppNameMatch[1].trim();
+      }
+
+      // Check master Supplier model to get canonical supplier name
+      const dbSupplier = await Supplier.findOne({ supplier_id: supplierId }).lean();
+      if (dbSupplier && dbSupplier.name) {
+        supplierName = dbSupplier.name;
+      }
+      if (!supplierName) {
+        supplierName = 'Unknown Supplier';
+      }
+
+      // 3. Extract Term dates: valid from YYYY-MM-DD to YYYY-MM-DD
       const datesMatch = text.match(/valid\s+from\s+([0-9]{4}-[0-9]{2}-[0-9]{2})\s+to\s+([0-9]{4}-[0-9]{2}-[0-9]{2})/i);
       const startDate = datesMatch ? new Date(datesMatch[1]) : new Date();
       const endDate = datesMatch ? new Date(datesMatch[2]) : new Date(Date.now() + 365 * 24 * 3600 * 1000);
 
-      // Extract Value ceiling: INR XX,XX,XXX
+      // 4. Extract Value ceiling: INR XX,XX,XXX
       const ceilingMatch = text.match(/exceed\s+INR\s+([0-9,]+)/i);
       const valueCap = ceilingMatch ? parseFloat(ceilingMatch[1].replace(/,/g, '')) : 1000000;
 
-      // Extract Items & Rates from Schedule A table
-      // e.g. 1 ITM-1036 Pneumatic cylinder 50x100 NOS 3,537.76
+      // 5. Extract Items & Rates from Schedule A table (handles dense text without spaces from pdf-parse)
       const lines: any[] = [];
-      const itemPattern = /(\d+)\s+(ITM-\d+)\s+([A-Za-z0-9\s/.-]+?)\s+(NOS|KG|MTR|LTR|CYL|BRL|BKT|SET|PAIR|ROL|REAM|MON|QTR|JOB)\s+([0-9,]+(?:\.[0-9]+)?)/g;
+      const itemPattern = /(\d+)\s*(ITM-\d+)\s*(.+?)\s*(NOS|KG|MTR|LTR|CYL|BRL|BKT|SET|PAIR|ROL|REAM|MON|QTR|JOB)\s*([0-9,]+(?:\.[0-9]+)?)/gi;
       let match;
       while ((match = itemPattern.exec(text)) !== null) {
         lines.push({
@@ -125,8 +164,12 @@ router.post(
         });
       }
 
-      // Upsert into MongoDB
-      await Contract.findOneAndUpdate(
+      // 6. Preserve existing spend if updating an existing contract
+      const existing = await Contract.findOne({ contract_id: contractId }).lean();
+      const consumedValue = existing ? (existing.consumed_value ?? 0) : 0;
+
+      // 7. Upsert into MongoDB
+      const updatedContract = await Contract.findOneAndUpdate(
         { contract_id: contractId },
         {
           contract_id: contractId,
@@ -135,11 +178,12 @@ router.post(
           start_date: startDate,
           end_date: endDate,
           value_cap: valueCap,
-          consumed_value: 0,
+          consumed_value: consumedValue,
         },
         { upsert: true, new: true }
       );
 
+      // 8. Insert or replace line items
       if (lines.length > 0) {
         await ContractLine.deleteMany({ contract_id: contractId });
         await ContractLine.insertMany(lines);
@@ -147,6 +191,8 @@ router.post(
 
       res.json({
         success: true,
+        message: `Contract ${contractId} registered successfully with ${lines.length} lines for ${supplierName}`,
+        contract: updatedContract,
         extracted: {
           contract_id: contractId,
           supplier_id: supplierId,

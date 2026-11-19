@@ -56,8 +56,8 @@ router.post(
       if (req.file) {
         const fileContent = req.file.buffer.toString('utf-8');
         rawPRs = parsePRBatchCSV(fileContent);
-      } else if (req.body?.csv) {
-        rawPRs = parsePRBatchCSV(req.body.csv);
+      } else if (req.body?.csv || req.body?.csv_text) {
+        rawPRs = parsePRBatchCSV(req.body.csv || req.body.csv_text);
       } else if (req.body?.prLines && Array.isArray(req.body.prLines)) {
         rawPRs = req.body.prLines.map((r: any) => ({
           ...r,
@@ -125,7 +125,7 @@ router.post(
         };
       });
 
-      Promise.all([
+      await Promise.all([
         PurchaseRequisition.insertMany(prDocs).catch((err) =>
           console.error('[DB] Error saving PRs:', err)
         ),
@@ -147,6 +147,7 @@ router.post(
         batchId,
         policyVersion: activePolicy.version,
         totalLines: results.length,
+        total_pr_lines: results.length,
         totalRequirements: clubbedRequirements.length,
         processingTimeMs,
         routeBreakdown,

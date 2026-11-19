@@ -7,9 +7,9 @@ export interface IPRLineRef {
 
 export interface ISuggestedSupplier {
   supplier_id: string;
-  name: string;
-  score: number;
-  rank: number;
+  name?: string;
+  score?: number;
+  rank?: number;
 }
 
 export interface IBuyerOverride {
@@ -44,6 +44,8 @@ export interface IDecision extends Document {
 }
 
 const DECISION_TYPES = [
+  'PO',
+  'SOURCING_REQUEST',
   'CONTRACT_PO',
   'SPOT_PO',
   'EMERGENCY_PO',
@@ -51,6 +53,9 @@ const DECISION_TYPES = [
   'RFP',
   'CAPEX_SOURCING',
   'NEW_ITEM_SOURCING',
+  'DIRECT_PO',
+  'INVALID_PR',
+  'INVALID_PLANT',
 ];
 
 const STATUS_TYPES = [
@@ -85,9 +90,9 @@ const decisionSchema = new Schema<IDecision>(
     suggested_suppliers: [
       {
         supplier_id: { type: String, required: true },
-        name: { type: String, required: true },
-        score: { type: Number, required: true },
-        rank: { type: Number, required: true },
+        name: { type: String },
+        score: { type: Number },
+        rank: { type: Number },
         _id: false,
       },
     ],

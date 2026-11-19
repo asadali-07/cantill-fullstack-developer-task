@@ -1,6 +1,8 @@
 import { getGeminiModel } from './geminiClient';
 import { Item, IItem } from '../models/Item';
 import { Plant } from '../models/Plant';
+import { PurchaseRequisition } from '../models/PurchaseRequisition';
+import { Decision } from '../models/Decision';
 import { matchItem } from '../engine/matcher';
 import { runDecisionEngine } from '../engine/engine';
 import { RawPRLine } from '../engine/clubber';
@@ -169,6 +171,53 @@ export async function processChat(
         const { results } = await runDecisionEngine([pr]);
         const decision = results[0];
 
+        // Persist both PR and Decision to MongoDB so they appear in Buyer Workspace
+        try {
+          await Promise.all([
+            PurchaseRequisition.create({
+              pr_no: pr.pr_no,
+              pr_line: 1,
+              created_at: pr.created_at,
+              requester: pr.requester,
+              department: pr.department,
+              plant: pr.plant,
+              item_code: pr.item_code || decision.resolved_item_code || '',
+              description: pr.description,
+              quantity: pr.quantity,
+              uom: pr.uom || 'NOS',
+              estimated_unit_price: pr.estimated_unit_price,
+              need_by_date: pr.need_by_date,
+              urgency: pr.urgency || 'Normal',
+              source: 'chat',
+              status: 'processed',
+              batch_id: 'CHAT',
+            }),
+            Decision.create({
+              decision_id: `DEC-${pr.pr_no}`,
+              batch_id: 'CHAT',
+              policy_version: decision.policy_version || '5.0',
+              pr_lines: [{ pr_no: pr.pr_no, pr_line: 1 }],
+              item_code: decision.resolved_item_code || pr.item_code,
+              item_description: pr.description,
+              plant: pr.plant,
+              total_quantity: pr.quantity,
+              uom: pr.uom || 'NOS',
+              unit_price: decision.unit_price ? parseFloat(decision.unit_price) : 0,
+              total_value: decision.group_value_inr || 0,
+              decision: decision.route,
+              decision_reason: decision.reason,
+              suggested_suppliers: (decision.suggested_supplier_ids || '')
+                .split(';')
+                .filter(Boolean)
+                .map((s, idx) => ({ supplier_id: s, rank: idx + 1 })),
+              po_number: decision.po_id || undefined,
+              status: 'pending_review',
+            }),
+          ]);
+        } catch (dbErr) {
+          console.error('[DB] Failed to save chat PR/Decision to database:', dbErr);
+        }
+
         const reply = `✅ **PR Created & Processed!**\n\n` +
           `📋 **PR Number:** ${pr.pr_no}\n` +
           `📦 **Item:** ${pr.description} (${pr.item_code || 'NEW'})\n` +
@@ -212,7 +261,7 @@ export async function processChat(
   // Send to Gemini
   try {
     const systemPrompt = buildSystemPrompt(items, plantCodes);
-    const model = getGeminiModel('gemini-2.5-flash', systemPrompt);
+    const model = getGeminiModel('gemini-3.1-flash-lite', systemPrompt);
 
     const chatHistory = session.messages.map((m) => ({
       role: m.role === 'user' ? ('user' as const) : ('model' as const),

@@ -296,7 +296,7 @@ export default function PolicyPage() {
                 <h3 className="text-sm font-bold text-slate-800">Amend Policy (No Code Change)</h3>
               </div>
               <span className="text-[10px] font-semibold text-primary-700 bg-primary-50 px-2 py-0.5 rounded-full">
-                Gemini 2.5 AI Powered
+                Gemini 3.1 AI Powered
               </span>
             </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import {
   FileText,
   Search,
@@ -56,9 +56,34 @@ export default function ContractsPage() {
     setLoading(true);
     try {
       const res = await apiClient.get('/contracts');
-      if (res.data && Array.isArray(res.data)) {
-        setContracts(res.data);
-      }
+      const list = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray(res.data?.contracts)
+        ? res.data.contracts
+        : [];
+
+      const normalized: Contract[] = list.map((c: any) => ({
+        ...c,
+        contract_ref: c.contract_ref || c.contract_id || '',
+        supplier_id: c.supplier_id || '',
+        supplier_name: c.supplier_name || c.supplier_id || '',
+        contract_type: c.contract_type || 'Rate Contract',
+        valid_from: c.valid_from || c.start_date || '',
+        valid_to: c.valid_to || c.end_date || '',
+        ceiling_value: Number(c.ceiling_value ?? c.value_cap ?? 0),
+        cumulative_spend: Number(c.cumulative_spend ?? c.consumed_value ?? 0),
+        plant: c.plant || 'ALL (PUN1, CHN1)',
+        is_active: c.is_active ?? true,
+        lines: (c.lines || []).map((l: any) => ({
+          ...l,
+          item_code: l.item_code || '',
+          item_description: l.item_description || l.description || '',
+          contracted_price: Number(l.contracted_price ?? l.rate ?? 0),
+          uom: l.uom || 'NOS',
+        })),
+      }));
+
+      setContracts(normalized);
     } catch {
       toast.error('Failed to load contracts');
     } finally {
@@ -85,10 +110,17 @@ export default function ContractsPage() {
       const res = await apiClient.post('/contracts/upload-pdf', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      const newRef = res.data?.extracted?.contract_id || res.data?.contract?.contract_id;
       toast.success(res.data?.message || 'Contract uploaded and processed successfully');
       setUploadModalOpen(false);
       setPdfFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       await loadContracts();
+      if (newRef) {
+        setExpandedRef(newRef);
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to parse contract PDF');
     } finally {
@@ -237,9 +269,8 @@ export default function ContractsPage() {
                   const isExpanded = expandedRef === c.contract_ref;
 
                   return (
-                    <>
+                    <Fragment key={c.contract_ref}>
                       <tr
-                        key={c.contract_ref}
                         className="hover:bg-slate-50/70 transition-colors cursor-pointer"
                         onClick={() =>
                           setExpandedRef(isExpanded ? null : c.contract_ref)
@@ -339,7 +370,7 @@ export default function ContractsPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })
               )}
@@ -368,6 +399,7 @@ export default function ContractsPage() {
                   Select Contract PDF Document
                 </label>
                 <input
+                  ref={fileInputRef}
                   type="file"
                   accept=".pdf"
                   onChange={(e) => setPdfFile(e.target.files?.[0] || null)}

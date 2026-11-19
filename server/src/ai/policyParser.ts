@@ -102,7 +102,7 @@ export async function parsePolicyAmendmentWithGemini(
   currentVersion: string
 ): Promise<ProposedAmendment> {
   try {
-    const model = getGeminiModel('gemini-2.5-flash');
+    const model = getGeminiModel('gemini-3.1-flash-lite');
 
     const prompt = `
 You are an expert procurement policy analyst for Corvo Engineering.

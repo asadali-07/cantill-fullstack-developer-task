@@ -4,7 +4,7 @@
 
 Cantill is an intelligent, full-stack procurement automation platform built for Corvo Engineering. It transforms unstructured and semi-structured Purchase Requisitions (PRs) into policy-compliant procurement actions: either automated Purchase Orders (POs) or structured Sourcing Requests (RFQs/RFPs).
 
-The core tenet of the system is **Policy-as-Data**: procurement policy (Corvo Policy v5.0 and future amendments) is stored as dynamic data within MongoDB rather than hardcoded in application logic. When procurement leadership amends policy thresholds or rules through the user interface, the system interprets the memo using Gemini 2.5 AI, computes an exact diff, updates the active policy record, and alters all downstream routing decisions without code changes or redeployments.
+The core tenet of the system is **Policy-as-Data**: procurement policy (Corvo Policy v5.0 and future amendments) is stored as dynamic data within MongoDB rather than hardcoded in application logic. When procurement leadership amends policy thresholds or rules through the user interface, the system interprets the memo using Gemini 3.1 AI, computes an exact diff, updates the active policy record, and alters all downstream routing decisions without code changes or redeployments.
 
 ---
 
@@ -15,9 +15,9 @@ The core tenet of the system is **Policy-as-Data**: procurement policy (Corvo Po
 | **Frontend** | React 19, Vite, Tailwind CSS, Lucide Icons, Axios | High performance, instant compilation, modern ergonomic UI with responsive data tables, KPI metrics, and live chat. |
 | **Backend** | Node.js, Express, TypeScript | Type-safe REST API with robust streaming support for CSV processing and multipart PDF ingestion. |
 | **Database** | MongoDB Atlas (Cloud) | Flexible document store capable of modeling both normalized transactional data (Items, Contracts, Suppliers) and dynamic JSON rule schemas (Policy-as-Data). |
-| **AI Provider** | Google Gemini API (`gemini-2.5-flash`) | State-of-the-art reasoning model for conversational catalog matching, requirement validation, and zero-shot policy amendment extraction. |
+| **AI Provider** | Google Gemini API (`gemini-3.1-flash-lite`) | State-of-the-art reasoning model for conversational catalog matching, requirement validation, and zero-shot policy amendment extraction. |
 | **Parsing & Export** | `csv-parse`, `csv-stringify`, `pdf-parse` | Robust CSV reading/generation and PDF contract text extraction. |
-| **Deployment** | Docker & Docker Compose | Single-command reproduction (`docker-compose up --build`) with Nginx reverse proxy. |
+| **Runtime Environment** | Node.js v20+, Vite Dev Server | Fast local development and direct production serving without container overhead. |
 
 ---
 
@@ -57,7 +57,7 @@ The core tenet of the system is **Policy-as-Data**: procurement policy (Corvo Po
 +--------------------------------------+   +----------------------------------------+
 |           MONGODB ATLAS              |   |           GOOGLE GEMINI API            |
 |                                      |   |                                        |
-|  - Items (73 master items)           |   |  - gemini-2.5-flash                    |
+|  - Items (73 master items)           |   |  - gemini-3.1-flash-lite               |
 |  - Suppliers (48 vendors)            |   |  - System instruction item grounding   |
 |  - Plants (PUN1, CHN1)               |   |  - Multi-turn conversation state       |
 |  - Contracts & Lines (12 contracts)  |   |  - Zero-code policy amendment parser   |
@@ -125,7 +125,7 @@ Requirements routed to POs for the same supplier and plant within a 24-hour crea
 
 ---
 
-## 5. Gemini 2.5 AI Integration
+## 5. Gemini 3.1 Flash Lite AI Integration
 
 ### Module 1: Chat PR Intake (`chatService.ts`)
 - **System Instruction Grounding**: The complete item master catalog and valid plant codes are injected into Gemini's system instructions.
